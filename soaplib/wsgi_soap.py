@@ -1,4 +1,22 @@
-import cStringIO
+#
+# soaplib - Copyright (C) 2009 Aaron Bickell, Jamie Kirkpatrick
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
+#
+
+import io as cStringIO
 import traceback
 
 from soaplib.soap import (make_soap_envelope, make_soap_fault, from_soap,
@@ -24,7 +42,7 @@ _debug_logger = None
 
 
 def _dump(e): # util?
-    print e
+    print(e)
 
 
 def log_exceptions(on, out=_dump):
@@ -187,7 +205,7 @@ class WSGISoapApp(object):
 
                     # implementation hook
                     self.onWsdl(environ, wsdl_content)
-                except Exception, e:
+                except Exception as e:
 
                     # implementation hook
                     buffer = cStringIO.StringIO()
@@ -199,8 +217,9 @@ class WSGISoapApp(object):
                     exceptions(faultStr)
                     self.onWsdlException(environ, e, faultStr)
                     # initiate the response
-                    start_response('500', [('Content-type', 'text/xml'),
-                        ('Content-length', str(len(faultStr)))])
+                    start_response('500 Internal Server Error',
+                                   [('Content-type', 'text/xml'),
+                                    ('Content-length', str(len(faultStr)))])
                     return [faultStr]
 
                 reset_request()
@@ -213,18 +232,23 @@ class WSGISoapApp(object):
             input = environ.get('wsgi.input')
             length = environ.get("CONTENT_LENGTH")
             body = input.read(int(length))
+
+            methodname = environ.get("HTTP_SOAPACTION")
+
+            debug('\033[92m'+ methodname +'\033[0m')
             debug(body)
+
             body = collapse_swa(environ.get("CONTENT_TYPE"), body)
 
             # deserialize the body of the message
             try:
                 payload, header = from_soap(body)
-            except SyntaxError, e:
+            except SyntaxError as e:
                 payload = None
                 header = None
 
-            if payload:
-                methodname = payload.tag.split('}')[-1]
+            if payload is not None:
+                methodname = payload.tag
             else:
                 # check HTTP_SOAPACTION
                 methodname = environ.get("HTTP_SOAPACTION")
@@ -235,12 +259,11 @@ class WSGISoapApp(object):
 
             request.header = header
 
-            # call the method
-            func = getattr(service, methodname)
-
             # retrieve the method descriptor
-            descriptor = func(_soap_descriptor=True, klazz=service.__class__)
-            if payload:
+            descriptor = service.get_method(methodname)
+            func = getattr(service, descriptor.name)
+            
+            if payload is not None and len(payload) > 0:
                 params = descriptor.inMessage.from_xml(*[payload])
             else:
                 params = ()
@@ -268,7 +291,6 @@ class WSGISoapApp(object):
             # construct the soap response, and serialize it
             envelope = make_soap_envelope(results, tns=service.__tns__,
                 header_elements=response_headers)
-            ElementTree.cleanup_namespaces(envelope)
             resp = ElementTree.tostring(envelope, encoding=string_encoding)
             headers = {'Content-Type': 'text/xml'}
 
@@ -284,13 +306,14 @@ class WSGISoapApp(object):
 
             self.onReturn(environ, resp)
 
+            debug('\033[91m'+ "Response" + '\033[0m')
             debug(resp)
 
             # return the serialized results
             reset_request()
             return [resp]
 
-        except Fault, e:
+        except Fault as e:
             # grab any headers that were included in the request
             response_headers = None
             if hasattr(request, 'response_headers'):
@@ -304,6 +327,7 @@ class WSGISoapApp(object):
                 header_elements=response_headers)
 
             faultStr = ElementTree.tostring(fault, encoding=string_encoding)
+
             exceptions(faultStr)
 
             self.onException(environ, e, faultStr)
@@ -314,7 +338,7 @@ class WSGISoapApp(object):
                 [('Content-type', 'text/xml')])
             return [faultStr]
 
-        except Exception, e:
+        except Exception as e:
             # Dump the stack trace to a buffer to be sent
             # back to the caller
 

@@ -1,3 +1,21 @@
+#
+# soaplib - Copyright (C) 2009 Aaron Bickell, Jamie Kirkpatrick
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
+#
+
 import datetime
 import httplib
 import new
@@ -153,14 +171,14 @@ def make(__type_name, **kwargs):
 
 if __name__ == '__main__':
     echoInteger = make('echoInteger', i=34)
-    print et.tostring(echoInteger.to_xml(echoInteger, 'echoInteger'))
+    print(et.tostring(echoInteger.to_xml(echoInteger, 'echoInteger')))
 
     c = DocumentClient('http://localhost:9753/',
         ['echoInteger', 'echoSimpleClass', 'echoSimpleClassArray'])
-    print c.echoInteger(make('echoInteger', i=3)).retval
+    print(c.echoInteger(make('echoInteger', i=3)).retval)
 
-    print c.echoSimpleClass(make('echoSimpleClass',
-        sc=make('SimpleClass', i=34, s='bobo'))).retval.s
+    print(c.echoSimpleClass(make('echoSimpleClass',
+        sc=make('SimpleClass', i=34, s='bobo'))).retval.s)
 
     d = c.echoSimpleClassArray(make('echoSimpleClassArray',
         sca=[
@@ -168,6 +186,6 @@ if __name__ == '__main__':
             make('SimpleClass', i=34, s='bobo'),
             make('SimpleClass', i=34, s='poo'),
         ]))
-    print '*' * 80
+    print('*' * 80)
     for sc in d.retval:
-        print sc.s
+        print(sc.s)

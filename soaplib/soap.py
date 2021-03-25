@@ -1,5 +1,24 @@
+#
+# soaplib - Copyright (C) 2009 Aaron Bickell, Jamie Kirkpatrick
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
+#
+
 from base64 import b64encode
-from StringIO import StringIO
+from io import StringIO
+from urllib.parse import unquote
 
 # import email data format related stuff
 try:
@@ -36,7 +55,7 @@ class Message(object):
         if len(self.params):
             if len(data) != len(self.params):
                 raise Exception("Parameter number mismatch expected [%s] "
-                    "got [%s]"%(len(self.params), len(data)))
+                    "got [%s] for response %s"%(len(self.params), len(data), self.name))
 
         nsmap = NamespaceLookup(self.ns)
         element = create_xml_element(self.name, nsmap, self.ns)
@@ -96,12 +115,12 @@ class Message(object):
                     "%s:%s" % (serializer.get_namespace_id(),
                         serializer.get_datatype()))
 
-        element = create_xml_element(nsmap.get('xs') + 'element', nsmap)
-        element.set('name', self.typ)
-        element.set('type', '%s:%s' % ('tns', self.typ))
+            element = create_xml_element(nsmap.get('xs') + 'element', nsmap)
+            element.set('name', self.typ)
+            element.set('type', '%s:%s' % ('tns', self.typ))
 
-        schemaDict[self.typ] = complexType
-        schemaDict[self.typ + 'Element'] = element
+            schemaDict[self.typ] = complexType
+            schemaDict[self.typ + 'Element'] = element
 
 
 class MethodDescriptor:
@@ -126,7 +145,7 @@ def from_soap(xml_string):
     '''
     Parses the xml string into the header and payload
     '''
-    root, xmlids = ElementTree.XMLID(xml_string)
+    root, xmlids = ElementTree.XMLID(xml_string.decode("utf-8"))
     if xmlids:
         resolve_hrefs(root, xmlids)
     body = None
@@ -159,6 +178,8 @@ def resolve_hrefs(element, xmlids):
             [e.set(k, v) for k, v in resolved_element.items()]
             # copies the children
             [e.append(child) for child in resolved_element.getchildren()]
+            # copies the text
+            e.text = resolved_element.text
         else:
             resolve_hrefs(e, xmlids)
     return element
@@ -183,11 +204,13 @@ def make_soap_envelope(message, tns='', header_elements=None):
         for h in header_elements:
             headerElement.append(h)
     body = create_xml_subelement(envelope, nsmap.get('SOAP-ENV') + 'Body')
+
     if type(message) == list:
         for m in message:
             body.append(m)
     elif message != None:
         body.append(message)
+
     return envelope
 
 
@@ -207,6 +230,20 @@ def join_attachment(id, envelope, payload, prefix=True):
     @return             tuple of length 2 with the new message and the
                         number of replacements made
     '''
+
+    def replacing(parent, node, payload, numreplaces):
+        if node.tag.split('}')[-1] == 'Include':
+            attrib = node.attrib.get('href')
+            if not attrib is None:
+                if unquote(attrib) == id:
+                    parent.remove(node)
+                    parent.text = payload
+                    numreplaces += 1
+        else:
+            for child in node:
+                numreplaces = replacing(node, child, payload, numreplaces)
+        return numreplaces
+
 
     # grab the XML element of the message in the SOAP body
     soapmsg = StringIO(envelope)
@@ -229,15 +266,15 @@ def join_attachment(id, envelope, payload, prefix=True):
     for param in message:
         # Look for Include subelement.
         for sub in param:
-            if sub.tag.split('}')[-1] == 'Include' and \
-               sub.attrib.get('href') == id:
-                param.remove(sub)
-                param.text = payload
-                numreplaces += 1
-        if numreplaces < 1 and param.attrib.get('href') == id:
-            del(param.attrib['href'])
-            param.text = payload
-            numreplaces += 1
+            numreplaces = replacing(param, sub, payload, numreplaces)
+
+        if numreplaces < 1:
+            attrib = param.attrib.get('href')
+            if not attrib is None:
+                if unquote(attrib) == id:
+                    del(param.attrib['href'])
+                    param.text = payload
+                    numreplaces += 1
 
     soapmsg.close()
     soapmsg = StringIO()

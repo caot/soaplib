@@ -1,25 +1,42 @@
-from cStringIO import StringIO
-import httplib
+#
+# soaplib - Copyright (C) 2009 Aaron Bickell, Jamie Kirkpatrick
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
+#
+
+import io as StringIO
+from http import client as httplib
 import sys
 
 from soaplib.etimport import ElementTree
 from soaplib.soap import (from_soap, make_soap_envelope, collapse_swa,
     apply_mtom)
-from soaplib.util import split_url, create_relates_to_header
+from soaplib.util import split_url, create_relates_to_header, check_pyversion
 from soaplib.serializers.primitive import Fault
 
+if not check_pyversion(2, 5, 2):
+    # This sets the HTTP version string sent to the server to 1.0
+    # preventing the response from bein 'chunked'.  This is done
+    # because of a know bug in python (#900744).  Rather than apply
+    # the patch to all the installed systems, it is simpler to set this
+    # version string, to be later removed in python 2.5
+    #
+    httplib.HTTPConnection._http_vsn_str = 'HTTP/1.0'
 
-# This sets the HTTP version string sent to the server to 1.0
-# preventing the response from bein 'chunked'.  This is done
-# because of a know bug in python (#900744).  Rather than apply
-# the patch to all the installed systems, it is simpler to set this
-# version string, to be later removed in python 2.5
-#
-httplib.HTTPConnection._http_vsn_str = 'HTTP/1.0'
-
-_debug = False
+_debug = True
 _out = sys.stdout
-
 
 def debug(is_on, out=sys.stdout):
     '''
@@ -30,7 +47,6 @@ def debug(is_on, out=sys.stdout):
     global _out, _debug
     _out = out
     _debug = is_on
-
 
 def dump(host, path, headers, envelope):
     '''
@@ -45,6 +61,9 @@ def dump(host, path, headers, envelope):
         return
 
     def writeln(text):
+        if isinstance(text, bytes):
+            text = text.decode("utf-8")
+
         _out.write(text)
         _out.write('\r\n')
         _out.flush()
@@ -65,7 +84,6 @@ Parameter Do Not Match:
 %s
 + Parameters Required:
 %s'''
-
 
 class SimpleSoapClient(object):
     '''
@@ -121,15 +139,16 @@ class SimpleSoapClient(object):
         tns = self.descriptor.inMessage.ns
         envelope = make_soap_envelope(msg, tns, header_elements=headers)
 
-        body = ElementTree.tostring(envelope)
+        body = ElementTree.tostring(envelope,pretty_print=_debug)
         methodName = '\"%s\"' % self.descriptor.soapAction
-        httpHeaders = {'Content-Length': len(body),
-                      'Content-type': 'text/xml; charset="UTF-8"',
-                      'Accept': ('application/soap+xml, application/dime, '
-                                'multipart/related, text/*'),
-                      'User-Agent': 'Soaplib/1.0',
-                      'SOAPAction': methodName,
-                      }
+        httpHeaders = {
+            'Content-Length': len(body),
+            'Content-type': 'text/xml; charset="UTF-8"',
+            'Accept': ('application/soap+xml, application/dime, '
+                                                'multipart/related, text/*'),
+            'User-Agent': 'Soaplib/0.8.2',
+            'SOAPAction': methodName,
+        }
 
         for k, v in kwargs.items():
             # add all the other keywords to the http headers
@@ -153,18 +172,23 @@ class SimpleSoapClient(object):
         conn.request("POST", self.path, body=body, headers=httpHeaders)
         response = conn.getresponse()
         data = response.read()
+        if _debug:
+            data = ElementTree.fromstring(data)
+            data = ElementTree.tostring(data,pretty_print=True)
 
         dump(self.host, self.path, dict(response.getheaders()), data)
 
         contenttype = response.getheader('Content-Type')
         data = collapse_swa(contenttype, data)
 
+
         conn.close()
-        if str(response.status) not in['200', '202']:
+        if not (str(response.status) in ('200', '202')):
             # consider everything NOT 200 or 202 as an error response
 
             if str(response.status) == '500':
                 fault = None
+
                 try:
                     payload, headers = from_soap(data)
                     fault = Fault.from_xml(payload)
@@ -177,6 +201,7 @@ class SimpleSoapClient(object):
                         "%s %s \n %s \n %s" %
                         (response.status, response.reason, trace.getvalue(),
                          data))
+
                 raise fault
             else:
                 raise Exception("%s %s" % (response.status, response.reason))
@@ -186,8 +211,10 @@ class SimpleSoapClient(object):
 
         payload, headers = from_soap(data)
         results = self.descriptor.outMessage.from_xml(payload)
+        #TODO: consider supporting multiple return types in a better manner
+        if len(results) > 1:
+            return results
         return results[0]
-
 
 class ServiceClient(object):
     '''
@@ -206,7 +233,6 @@ class ServiceClient(object):
         for method in self.server.methods():
             setattr(self, method.name,
                 SimpleSoapClient(host, path, method, scheme))
-
 
 def make_service_client(url, impl):
     scheme, host, path = split_url(url)

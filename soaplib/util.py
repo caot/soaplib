@@ -1,6 +1,24 @@
+#
+# soaplib - Copyright (C) 2009 Aaron Bickell, Jamie Kirkpatrick
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
+#
+
 import datetime
-import urllib
-from urllib import quote
+from urllib import parse as urllib_parse
+from urllib.parse import quote
 
 from soaplib.etimport import ElementTree
 
@@ -63,8 +81,9 @@ def get_relates_to_info():
 
 def split_url(url):
     '''Splits a url into (uri_scheme, host[:port], path)'''
-    scheme, remainder = urllib.splittype(url)
-    host, path = urllib.splithost(remainder)
+    # http://python3porting.com/stdlib.html
+    scheme, remainder = urllib_parse.splittype(url)
+    host, path = urllib_parse.splithost(remainder)
     return scheme.lower(), host, path
 
 
@@ -103,6 +122,10 @@ def reconstruct_url(environ):
         url += '?' + environ['QUERY_STRING']
     return url
 
+def check_pyversion(*minversion):
+    import sys
+    pyver = sys.version_info[:3]
+    return pyver >= minversion
 
 ###################################################################
 # Deprecated Functionality

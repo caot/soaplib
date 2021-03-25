@@ -1,3 +1,21 @@
+#
+# soaplib - Copyright (C) 2009 Aaron Bickell, Jamie Kirkpatrick
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
+#
+
 from soaplib.soap import Message, MethodDescriptor
 from soaplib.xml import create_xml_element, create_xml_subelement
 from soaplib.xml import ElementTree, NamespaceLookup
@@ -14,10 +32,9 @@ def soapmethod(*params, **kparams):
     '''
 
     def explain(f):
-
         def explainMethod(*args, **kwargs):
             if '_soap_descriptor' in kwargs:
-                name = f.func_name
+                name = f.__name__
 
                 _returns = kparams.get('_returns')
                 _isCallback = kparams.get('_isCallback', False)
@@ -26,8 +43,8 @@ def soapmethod(*params, **kparams):
                 _inMessage = kparams.get('_inMessage', name)
                 _inVariableNames = kparams.get('_inVariableNames', {})
                 _outMessage = kparams.get('_outMessage', '%sResponse' % name)
-                _outVariableName = kparams.get('_outVariableName',
-                    '%sResult' % name)
+                _outVariableNames = kparams.get('_outVariableNames',
+                    kparams.get('_outVariableName', '%sResult' % name))
                 _mtom = kparams.get('_mtom', False)
 
                 ns = None
@@ -38,35 +55,43 @@ def soapmethod(*params, **kparams):
                     ns = getTNS(kwargs['klazz'])
 
                 # input message
-                param_names = f.func_code.co_varnames[
-                    1:f.func_code.co_argcount]
+                param_names = f.__code__.co_varnames[
+                    1:f.__code__.co_argcount]
                 try:
                     in_params = [(_inVariableNames.get(param_names[i],
                                   param_names[i]), params[i])
                                  for i in range(0, len(params))]
-                except IndexError, e:
-                    print f.func_name
+                except IndexError as e:
+                    print(f.__name__)
                     raise Exception("%s has parameter numbers mismatching" %
-                        f.func_name)
+                        f.__name__)
 
                 in_message = Message(_inMessage, in_params, ns=ns,
                     typ=_inMessage)
 
-                # output message
+                # output message  
+                out_params = []
                 if _returns:
-                    out_params = [(_outVariableName, _returns)]
+                    if isinstance(_returns, (list, tuple)):
+                        returns = zip(_outVariableNames, _returns)
+                        for key, value in returns:
+                            out_params.append((key, value))
+                    else:
+                        out_params = [(_outVariableNames, _returns)]
                 else:
                     out_params = []
                 out_message = Message(_outMessage, out_params, ns=ns,
                     typ=_outMessage)
                 doc = getattr(f, '__doc__')
-                descriptor = MethodDescriptor(f.func_name, _soapAction,
+
+                descriptor = MethodDescriptor(f.__name__, _soapAction,
                     in_message, out_message, doc, _isCallback, _isAsync,
                     _mtom)
                 return descriptor
             return f(*args, **kwargs)
+
         explainMethod.__doc__ = f.__doc__
-        explainMethod.func_name = f.func_name
+        explainMethod.func_name = f.__name__
         explainMethod._is_soap_method = True
         return explainMethod
     return explain
@@ -116,6 +141,16 @@ class SoapServiceBase(object):
         @return method descriptor list
         '''
         return self._soap_methods
+
+    def get_method(self, name):
+        '''Returns the metod descriptor based on element name or soap action'''
+        for method in self.methods():
+            if '{%s}%s' % (self.__tns__, method.inMessage.name) == name:
+                return method
+        for method in self.methods():
+            if method.soapAction == name:
+                return method
+        raise Exception('Method "%s" not found' % name)        
 
     def _hasCallbacks(self):
         '''Determines if this object has callback methods or not'''
@@ -179,6 +214,7 @@ class SoapServiceBase(object):
             wsaSchemaNode = create_xml_subelement(types, "schema")
             wsaSchemaNode.set("targetNamespace", tns+'Callback')
             wsaSchemaNode.set("xmlns", "http://www.w3.org/2001/XMLSchema")
+            wsaSchemaNode.set("elementFormDefault", "qualified")
 
             importNode = create_xml_subelement(wsaSchemaNode, "import")
             importNode.set("namespace",
@@ -242,7 +278,7 @@ class SoapServiceBase(object):
             opInput.set('name', method.inMessage.typ)
             opInput.set('message', 'tns:%s' % method.inMessage.typ)
 
-            if (method.outMessage.params != None and
+            if (len(method.outMessage.params) > 0 and
                 not method.isCallback and not method.isAsync):
                 opOutput = create_xml_subelement(operation, 'output')
                 opOutput.set('name', method.outMessage.typ)
@@ -307,6 +343,7 @@ class SoapServiceBase(object):
         schemaNode = create_xml_subelement(types, "schema")
         schemaNode.set("targetNamespace", self.__tns__)
         schemaNode.set("xmlns", "http://www.w3.org/2001/XMLSchema")
+        schemaNode.set("elementFormDefault", "qualified")
 
         for xxx, node in schema_entries.items():
             schemaNode.append(node)
@@ -334,14 +371,14 @@ class SoapServiceBase(object):
 
             messages.append(inMessage)
 
-            # making out part
-            outMessage = create_xml_element('message', nsmap)
-            outMessage.set('name', method.outMessage.typ)
+            # making out part only if necessary
             if len(method.outMessage.params) > 0:
+                outMessage = create_xml_element('message', nsmap)
+                outMessage.set('name', method.outMessage.typ)
                 outPart = create_xml_subelement(outMessage, 'part')
                 outPart.set('name', method.outMessage.name)
                 outPart.set('element', 'tns:' + method.outMessage.typ)
-            messages.append(outMessage)
+                messages.append(outMessage)
 
         for message in messages:
             root.append(message)
@@ -389,7 +426,7 @@ class SoapServiceBase(object):
             soapBody = create_xml_subelement(input, nsmap.get('soap') + 'body')
             soapBody.set('use', 'literal')
 
-            if (method.outMessage.params != None and
+            if (len(method.outMessage.params) > 0 and
                 not method.isAsync and not method.isCallback):
                 output = create_xml_subelement(operation, 'output')
                 output.set('name', method.outMessage.typ)

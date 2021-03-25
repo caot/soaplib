@@ -1,3 +1,21 @@
+#
+# soaplib - Copyright (C) 2009 Aaron Bickell, Jamie Kirkpatrick
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
+#
+
 from soaplib.etimport import ElementTree
 
 
@@ -69,7 +87,7 @@ def create_xml_element(name, nslookup, default_ns=None):
         namespace_map = {None: default_ns}
     else:
         namespace_map = {}
-    for key, value in nslookup.get_all().iteritems():
+    for key, value in nslookup.get_all().items():
         if value != default_ns:
             namespace_map[key] = value
     return ElementTree.Element(name, nsmap=namespace_map)
